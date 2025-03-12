@@ -1,0 +1,69 @@
+factor_groups:
+  - name: "US Equity"
+    description: "US equity index futures"
+    assets:
+      - "ES00-USA"  # S&P 500
+      - "NQ00-USA"  # NASDAQ 100
+
+  - name: "European Equity"
+    description: "European equity index futures"
+    assets:
+      - "FESX00-EUR"  # Euro STOXX 50
+      - "Z00-IFEU"    # FTSE 100
+
+  - name: "Asian Equity"
+    description: "Asian equity index futures"
+    assets:
+      - "NIK22500-OSE"  # Nikkei 225
+
+  - name: "Energy"
+    description: "Global energy futures"
+    assets:
+      - "CL00-USA"    # US Light Crude
+      - "BRN00-IFEU"  # Brent Crude
+      - "NG00-USA"    # Natural Gas
+
+  - name: "Precious Metals"
+    description: "Precious metals futures"
+    assets:
+      - "GC00-USA"  # Gold
+      - "SI00-USA"  # Silver
+
+  - name: "US Rates"
+    description: "US Treasury futures across the curve"
+    assets:
+      - "TU00-USA"  # 2Y
+      - "FV00-USA"  # 5Y
+      - "TY00-USA"  # 10Y
+
+  - name: "European Rates"
+    description: "European government bond futures"
+    assets:
+      - "FGBS00-EUR"  # German 2Y
+      - "FGBM00-EUR"  # German 5Y
+      - "FGBL00-EUR"  # German 10Y
+      - "RLI00-IFEU"  # UK 10Y
+
+  - name: "Asian Rates"
+    description: "Asian government bond futures"
+    assets:
+      - "JBT00-OSE"   # Japanese 10Y
+      - "JGBS00-OSE"  # Japanese 20Y
+
+  - name: "Major FX"
+    description: "Major currency futures vs USD"
+    assets:
+      - "EC00-USA"   # EUR
+      - "JY00-USA"   # JPY
+      - "BP00-USA"   # GBP
+      - "SFC00-USA"  # CHF
+
+  - name: "EM FX"
+    description: "Emerging market currency futures"
+    assets:
+      - "RMB00-USA"  # CNY
+
+model_settings:
+  pca_factors: 6  # Increased from 3 to 6
+  risk_lookback_days: 252
+  min_coverage_pct: 80 

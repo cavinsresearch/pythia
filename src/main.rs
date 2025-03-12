@@ -1,16 +1,19 @@
 mod analysis;
+mod config;
 mod data;
 
-use analysis::{
-    factor_config::{create_default_factor_groups, create_pca_factor_groups},
-    factor_model::ThematicFactorModel,
-    pca::PCA,
-    risk_attribution::RiskAttributor,
-};
+use analysis::{factor_model::ThematicFactorModel, pca::PCA, risk_attribution::RiskAttributor};
 use data::loader::DataLoader;
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load configuration
+    let config = config::Config::load("config/factor_groups.yaml")?;
+    println!(
+        "Loaded factor configuration with {} groups",
+        config.factor_groups.len()
+    );
+
     // Get data file path from command line or use default
     let data_path = env::args()
         .nth(1)
@@ -26,9 +29,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         returns.ncols()
     );
 
-    // First, run PCA analysis
+    // First, run PCA analysis with configured number of factors
     println!("\n=== Statistical Factor Analysis (PCA) ===");
-    let pca = PCA::new(Some(3)); // Keep top 3 factors
+    let pca = PCA::new(Some(config.model_settings.pca_factors));
     let mut pca_result = pca.fit_transform(returns.view())?;
 
     // Print explained variance ratios
@@ -55,7 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute risk attribution for PCA factors
     println!("\n=== PCA Risk Attribution Analysis ===");
-    let risk_attributor = RiskAttributor::new(pca_result.factor_model, 252); // 1 year lookback
+    let risk_attributor = RiskAttributor::new(
+        pca_result.factor_model,
+        config.model_settings.risk_lookback_days,
+    );
     let attributions = risk_attributor.compute_portfolio_risk_attribution(
         returns.view(),
         &tickers,
@@ -80,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Now, let's do thematic factor analysis
     println!("\n=== Thematic Factor Analysis ===");
-    let factor_groups = create_default_factor_groups();
+    let factor_groups = config.to_factor_groups();
     println!("\nDefined {} thematic factors:", factor_groups.len());
     for group in &factor_groups {
         println!("\n{}: {}", group.name, group.description);
@@ -98,7 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute risk attribution for thematic factors
     println!("\n=== Thematic Risk Attribution Analysis ===");
-    let risk_attributor = RiskAttributor::new(factor_model, 252); // 1 year lookback
+    let risk_attributor =
+        RiskAttributor::new(factor_model, config.model_settings.risk_lookback_days);
     let attributions = risk_attributor.compute_portfolio_risk_attribution(
         returns.view(),
         &tickers,
