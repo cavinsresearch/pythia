@@ -26,6 +26,34 @@ impl From<LinalgError> for FactorModelError {
 
 pub type Result<T> = std::result::Result<T, FactorModelError>;
 
+/// Common trait for all factor models
+pub trait FactorModel {
+    /// Compute factor returns for the given returns data
+    fn compute_factor_returns(
+        &self,
+        returns: ArrayView2<f64>,
+        tickers: &[String],
+    ) -> Result<Array2<f64>>;
+
+    /// Orthogonalize factor returns using the specified method
+    fn orthogonalize_factor_returns(
+        &mut self,
+        factor_returns: ArrayView2<f64>,
+        method: OrthogonalizationMethod,
+        max_correlation: f64,
+        min_variance_explained: f64,
+    ) -> Result<Array2<f64>>;
+
+    /// Get the factor groups that define this model
+    fn get_factor_groups(&self) -> &[FactorGroup];
+
+    /// Get mutable access to factor groups
+    fn get_factor_groups_mut(&mut self) -> &mut [FactorGroup];
+
+    /// Add metadata that can be used in factor computations
+    fn add_metadata(&mut self, key: &str, data: Array1<f64>);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactorGroup {
     pub name: String,
@@ -49,20 +77,10 @@ impl ThematicFactorModel {
             metadata: HashMap::new(),
         }
     }
+}
 
-    pub fn add_metadata(&mut self, key: &str, data: Array1<f64>) {
-        self.metadata.insert(key.to_string(), data);
-    }
-
-    pub fn get_factor_groups(&self) -> &[FactorGroup] {
-        &self.factor_groups
-    }
-
-    pub fn get_factor_groups_mut(&mut self) -> &mut [FactorGroup] {
-        &mut self.factor_groups
-    }
-
-    pub fn compute_factor_returns(
+impl FactorModel for ThematicFactorModel {
+    fn compute_factor_returns(
         &self,
         returns: ArrayView2<f64>,
         tickers: &[String],
@@ -154,7 +172,7 @@ impl ThematicFactorModel {
         Ok(factor_returns)
     }
 
-    pub fn orthogonalize_factor_returns(
+    fn orthogonalize_factor_returns(
         &mut self,
         factor_returns: ArrayView2<f64>,
         method: OrthogonalizationMethod,
@@ -165,13 +183,24 @@ impl ThematicFactorModel {
             FactorOrthogonalizer::new(method, max_correlation, min_variance_explained);
 
         let factor_names: Vec<String> = self.factor_groups.iter().map(|g| g.name.clone()).collect();
-
         let priority_order: Vec<String> = factor_names.clone();
 
         let (ortho_returns, _kept_factors) =
             orthogonalizer.orthogonalize(factor_returns, &factor_names, &priority_order);
 
         Ok(ortho_returns)
+    }
+
+    fn get_factor_groups(&self) -> &[FactorGroup] {
+        &self.factor_groups
+    }
+
+    fn get_factor_groups_mut(&mut self) -> &mut [FactorGroup] {
+        &mut self.factor_groups
+    }
+
+    fn add_metadata(&mut self, key: &str, data: Array1<f64>) {
+        self.metadata.insert(key.to_string(), data);
     }
 }
 

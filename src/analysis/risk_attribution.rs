@@ -1,7 +1,8 @@
-use super::factor_model::{FactorGroup, ThematicFactorModel};
+use super::factor_model::{FactorGroup, FactorModel, ThematicFactorModel};
 use crate::types::OrthogonalizationMethod;
-use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2};
-use ndarray_linalg::solve::Solve;
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Axis};
+use ndarray_linalg::{Eigh, Solve, UPLO};
+use ndarray_stats::QuantileExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -36,16 +37,18 @@ pub struct ModelFitMetrics {
 }
 
 #[derive(Debug)]
-pub struct RiskAttributor {
-    model: ThematicFactorModel,
-    lookback_periods: usize, // Window for volatility calculation
+pub struct RiskAttributor<M: FactorModel> {
+    model: M,
+    lookback_periods: usize,
+    returns: Array2<f64>, // Store returns matrix
 }
 
-impl RiskAttributor {
-    pub fn new(model: ThematicFactorModel, lookback_periods: usize) -> Self {
+impl<M: FactorModel> RiskAttributor<M> {
+    pub fn new(model: M, lookback_periods: usize, returns: Array2<f64>) -> Self {
         Self {
             model,
             lookback_periods,
+            returns,
         }
     }
 
@@ -181,96 +184,100 @@ impl RiskAttributor {
             .map_err(|e| RiskAttributionError::FactorModelError(e.into()))
     }
 
-    /// Performs out-of-sample testing of the factor model using expanding window
+    /// Evaluate model fitness using expanding window analysis
     pub fn evaluate_model_fitness(
         &mut self,
         returns: ArrayView2<f64>,
         tickers: &[String],
         window_size: usize,
     ) -> Result<ModelFitMetrics> {
-        let n_periods = returns.nrows();
-        if n_periods < window_size * 2 {
+        let min_periods = window_size * 2;
+        if returns.nrows() < min_periods {
             return Err(RiskAttributionError::InsufficientData);
         }
 
-        let mut cumulative_prediction_error = 0.0;
-        let mut cumulative_actual_return = 0.0;
-        let mut factor_loadings_history: HashMap<String, Vec<f64>> = HashMap::new();
-        let mut prediction_count = 0;
+        let lambda = 0.05;
+        let mut prediction_errors = Vec::new();
+        let mut factor_returns_history = Vec::new();
+        let step_size = 20;
 
-        // Initialize factor loadings history
-        for group in self.model.get_factor_groups() {
-            factor_loadings_history.insert(group.name.clone(), Vec::new());
-        }
+        // Get factor names
+        let factor_names: Vec<String> = self
+            .model
+            .get_factor_groups()
+            .iter()
+            .map(|g| g.name.clone())
+            .collect();
 
-        // Expanding window analysis with step size
-        let step_size = 20; // Predict every 20 days to reduce noise
-        for end_idx in (window_size..n_periods).step_by(step_size) {
-            // Training window
-            let train_returns = returns.slice(s![end_idx - window_size..end_idx, ..]);
+        for i in (window_size..returns.nrows()).step_by(step_size) {
+            let train_returns = returns.slice(s![i - window_size..i, ..]).to_owned();
+            let test_returns = if i + step_size <= returns.nrows() {
+                returns.slice(s![i..i + step_size, ..]).to_owned()
+            } else {
+                returns.slice(s![i..returns.nrows(), ..]).to_owned()
+            };
 
-            // Compute factor returns for training period
+            // Compute factor returns and store them
             let factor_returns = self
                 .model
                 .compute_factor_returns(train_returns.view(), tickers)?;
+            factor_returns_history.push(factor_returns.clone());
 
-            // Store factor loadings for stability analysis
-            for (i, group) in self.model.get_factor_groups().iter().enumerate() {
-                if let Some(loadings) = factor_loadings_history.get_mut(&group.name) {
-                    loadings.push(factor_returns[[factor_returns.nrows() - 1, i]]);
-                }
-            }
-
-            // Predict next period returns for each asset
-            let next_period_returns = if end_idx + step_size <= n_periods {
-                returns.slice(s![end_idx..end_idx + step_size, ..])
-            } else {
-                returns.slice(s![end_idx.., ..])
-            };
-
-            let mut total_squared_error = 0.0;
-            let mut total_actual_return = 0.0;
-
-            for asset_idx in 0..returns.ncols() {
-                let asset_returns = train_returns.column(asset_idx);
-                let factor_exposures =
+            // Compute factor exposures for each asset
+            let mut predictions = Array2::zeros((test_returns.nrows(), test_returns.ncols()));
+            for j in 0..test_returns.ncols() {
+                let asset_returns = train_returns.column(j);
+                let exposures =
                     self.compute_factor_exposures(factor_returns.view(), asset_returns)?;
-
-                // Predict returns for each period in the step
-                for period in 0..next_period_returns.nrows() {
-                    let predicted_return = factor_returns
-                        .row(factor_returns.nrows() - 1)
-                        .dot(&factor_exposures);
-                    let actual_return = next_period_returns[[period, asset_idx]];
-
-                    total_squared_error += (predicted_return - actual_return).powi(2);
-                    total_actual_return += actual_return;
-                    prediction_count += 1;
-                }
+                let asset_predictions = factor_returns.dot(&exposures);
+                predictions
+                    .column_mut(j)
+                    .assign(&asset_predictions.slice(s![..test_returns.nrows()]));
             }
 
-            cumulative_prediction_error += total_squared_error;
-            cumulative_actual_return += total_actual_return;
+            let error = &test_returns - &predictions;
+            prediction_errors.extend(error.iter().cloned());
         }
 
-        // Calculate factor stability (exponentially weighted autocorrelation)
+        // Compute metrics
+        let in_sample_r2 = self.compute_in_sample_r_squared(lambda)?;
+        let out_sample_r2 = 1.0
+            - prediction_errors.iter().map(|e| e * e).sum::<f64>()
+                / returns.iter().skip(window_size).map(|r| r * r).sum::<f64>();
+
+        let rmse = (prediction_errors.iter().map(|e| e * e).sum::<f64>()
+            / prediction_errors.len() as f64)
+            .sqrt();
+
+        let mean = prediction_errors.iter().sum::<f64>() / prediction_errors.len() as f64;
+        let variance = prediction_errors
+            .iter()
+            .map(|&e| (e - mean).powi(2))
+            .sum::<f64>()
+            / (prediction_errors.len() - 1) as f64;
+        let ir = mean.abs() / variance.sqrt();
+
+        // Compute factor stability for each factor
         let mut factor_stability = HashMap::new();
-        for (factor_name, loadings) in factor_loadings_history.iter() {
-            let stability = self.compute_stability(loadings);
+
+        for (j, factor_name) in factor_names.iter().enumerate() {
+            // Extract factor returns time series for this factor
+            let factor_series: Vec<f64> = factor_returns_history
+                .iter()
+                .map(|returns| returns.column(j).mean().unwrap_or(0.0))
+                .collect();
+
+            // Compute stability score
+            let stability = self.compute_stability(&factor_series);
             factor_stability.insert(factor_name.clone(), stability);
         }
 
-        // Compute final metrics
-        let prediction_error = (cumulative_prediction_error / prediction_count as f64).sqrt();
-        let information_ratio =
-            cumulative_actual_return / (prediction_error * (prediction_count as f64).sqrt());
-
         Ok(ModelFitMetrics {
-            in_sample_r_squared: self.compute_in_sample_r_squared(returns)?,
-            out_of_sample_r_squared: 1.0 - (prediction_error.powi(2) / returns.var(0.0)),
+            in_sample_r_squared: in_sample_r2,
+            out_of_sample_r_squared: out_sample_r2,
             factor_stability,
-            prediction_error,
-            information_ratio,
+            prediction_error: rmse,
+            information_ratio: ir,
         })
     }
 
@@ -279,34 +286,66 @@ impl RiskAttributor {
             return 0.0;
         }
 
-        let decay: f64 = 0.94; // Exponential decay factor
-        let mut numerator = 0.0;
-        let mut denominator = 0.0;
-        let mut weight_sum = 0.0;
+        // Compute rolling correlations with exponential decay
+        let decay: f64 = 0.94;
+        let window_size = 20.min(series.len() / 2);
+        let mut stability_scores = Vec::new();
 
-        for i in 1..series.len() {
+        for i in window_size..series.len() {
+            let window1 = &series[i - window_size..i];
+            let window2 = if i + window_size <= series.len() {
+                &series[i..i + window_size]
+            } else {
+                &series[i..series.len()]
+            };
+
+            // Skip if either window is too small
+            if window2.len() < 2 {
+                continue;
+            }
+
+            // Compute correlation between windows
+            let mean1: f64 = window1.iter().sum::<f64>() / window1.len() as f64;
+            let mean2: f64 = window2.iter().sum::<f64>() / window2.len() as f64;
+
+            let var1: f64 = window1.iter().map(|x| (x - mean1).powi(2)).sum::<f64>();
+            let var2: f64 = window2.iter().map(|x| (x - mean2).powi(2)).sum::<f64>();
+
+            if var1 == 0.0 || var2 == 0.0 {
+                continue;
+            }
+
+            let cov: f64 = window1
+                .iter()
+                .zip(window2.iter())
+                .take(window2.len())
+                .map(|(x, y)| (x - mean1) * (y - mean2))
+                .sum::<f64>();
+
+            let correlation = cov / (var1.sqrt() * var2.sqrt());
+
+            // Apply exponential decay weight
             let weight = decay.powf((series.len() - i) as f64);
-            numerator += weight * series[i] * series[i - 1];
-            denominator += weight * series[i].powi(2);
-            weight_sum += weight;
+            stability_scores.push(correlation.abs() * weight);
         }
 
-        if denominator == 0.0 {
+        if stability_scores.is_empty() {
             0.0
         } else {
-            numerator / denominator
+            // Return weighted average of stability scores
+            stability_scores.iter().sum::<f64>() / stability_scores.len() as f64
         }
     }
 
-    fn compute_in_sample_r_squared(&self, returns: ArrayView2<f64>) -> Result<f64> {
-        let total_variance = returns.var(0.0);
-        let residual_variance = self.compute_residual_variance(returns)?;
+    fn compute_in_sample_r_squared(&self, lambda: f64) -> Result<f64> {
+        let total_variance = self.returns.var(0.0);
+        let residual_variance = self.compute_residual_variance(lambda)?;
         Ok(1.0 - (residual_variance / total_variance))
     }
 
-    fn compute_residual_variance(&self, returns: ArrayView2<f64>) -> Result<f64> {
-        let n_periods = returns.nrows();
-        let n_assets = returns.ncols();
+    fn compute_residual_variance(&self, lambda: f64) -> Result<f64> {
+        let n_periods = self.returns.nrows();
+        let n_assets = self.returns.ncols();
         let mut total_residual_variance = 0.0;
 
         // Get tickers from the model's factor groups
@@ -320,11 +359,11 @@ impl RiskAttributor {
         // Compute factor returns for the entire period
         let factor_returns = self
             .model
-            .compute_factor_returns(returns.view(), &tickers)?;
+            .compute_factor_returns(self.returns.view(), &tickers)?;
 
         // For each asset
         for i in 0..n_assets {
-            let asset_returns = returns.column(i);
+            let asset_returns = self.returns.column(i);
             let factor_exposures =
                 self.compute_factor_exposures(factor_returns.view(), asset_returns)?;
             let fitted_returns = factor_returns.dot(&factor_exposures);
@@ -333,6 +372,42 @@ impl RiskAttributor {
         }
 
         Ok(total_residual_variance / n_assets as f64)
+    }
+
+    /// Compute PCA factor loadings with regularization
+    fn compute_factor_loadings(
+        &self,
+        returns: &Array2<f64>,
+        lambda: f64,
+    ) -> Result<(Array2<f64>, Array1<f64>)> {
+        let cov = compute_covariance_matrix(returns.view(), self.lookback_periods)?;
+
+        // Add regularization
+        let n = cov.nrows();
+        let mut reg_cov = cov.clone();
+        for i in 0..n {
+            reg_cov[[i, i]] += lambda;
+        }
+
+        // Compute eigendecomposition
+        let (eigvals, eigvecs) = reg_cov
+            .eigh(UPLO::Upper)
+            .map_err(|e| RiskAttributionError::FactorModelError(e.into()))?;
+
+        // Sort eigenvalues and eigenvectors in descending order
+        let mut idx: Vec<usize> = (0..n).collect();
+        idx.sort_by(|&i, &j| eigvals[j].partial_cmp(&eigvals[i]).unwrap());
+
+        let sorted_eigvals = Array1::from_vec(idx.iter().map(|&i| eigvals[i]).collect());
+        let sorted_eigvecs = Array2::from_shape_vec(
+            (n, n),
+            idx.iter()
+                .flat_map(|&i| eigvecs.column(i).to_vec())
+                .collect(),
+        )
+        .map_err(|_| RiskAttributionError::InvalidDimensions)?;
+
+        Ok((sorted_eigvecs, sorted_eigvals))
     }
 }
 

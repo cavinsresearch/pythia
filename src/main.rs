@@ -4,8 +4,10 @@ mod data;
 mod types;
 
 use analysis::{
-    factor_model::ThematicFactorModel, orthogonalization::FactorOrthogonalizer, pca::PCA,
-    risk_attribution::RiskAttributor,
+    factor_model::{FactorModel, ThematicFactorModel},
+    orthogonalization::FactorOrthogonalizer,
+    pca::{StatisticalFactorModel, PCA},
+    risk_attribution::{ModelFitMetrics, RiskAttributor},
 };
 use data::loader::DataLoader;
 use std::env;
@@ -37,13 +39,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // First, run PCA analysis with configured number of factors
     println!("\n=== Statistical Factor Analysis (PCA) ===");
     let pca = PCA::new(Some(config.model_settings.pca_factors));
-    let mut pca_result = pca.fit_transform(returns.view())?;
+    let mut statistical_model = pca.fit_transform(returns.view())?;
 
     // Print explained variance ratios
     println!("\nExplained variance ratios:");
     let mut cumulative = 0.0;
-    pca_result
-        .explained_variance_ratio
+    statistical_model
+        .get_explained_variance_ratio()
         .iter()
         .enumerate()
         .for_each(|(i, ratio)| {
@@ -57,15 +59,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
     // Set asset list for PCA factors
-    for group in pca_result.factor_model.get_factor_groups_mut() {
+    for group in statistical_model.get_factor_groups_mut() {
         group.assets = tickers.clone();
     }
 
     // Compute risk attribution for PCA factors
     println!("\n=== PCA Risk Attribution Analysis ===");
     let mut risk_attributor = RiskAttributor::new(
-        pca_result.factor_model,
+        statistical_model,
         config.model_settings.risk_lookback_days,
+        returns.clone(),
     );
     let attributions = risk_attributor.compute_portfolio_risk_attribution(
         returns.view(),
@@ -89,6 +92,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Evaluate PCA model fitness
+    println!("\n=== PCA Model Fitness Analysis ===");
+    let window_size = config.model_settings.risk_lookback_days;
+    let pca_fitness_metrics =
+        risk_attributor.evaluate_model_fitness(returns.view(), &tickers, window_size)?;
+    print_model_metrics("Statistical Factor (PCA)", &pca_fitness_metrics);
+
     // Now, let's do thematic factor analysis
     println!("\n=== Thematic Factor Analysis ===");
     let factor_groups = config.to_factor_groups();
@@ -98,20 +108,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Assets: {}", group.assets.join(", "));
     }
 
-    let mut factor_model = ThematicFactorModel::new(factor_groups);
-    let mut factor_returns = factor_model.compute_factor_returns(returns.view(), &tickers)?;
+    let mut thematic_model = ThematicFactorModel::new(factor_groups);
+    let mut factor_returns = thematic_model.compute_factor_returns(returns.view(), &tickers)?;
 
     // Orthogonalize factor returns if enabled
     if config.orthogonalization.enabled {
-        let priority_order = config.get_factor_priority();
-        let ortho_returns = factor_model.orthogonalize_factor_returns(
+        factor_returns = thematic_model.orthogonalize_factor_returns(
             factor_returns.view(),
             config.orthogonalization.method,
             config.orthogonalization.constraints.max_correlation,
             config.orthogonalization.constraints.min_variance_explained,
         )?;
-
-        factor_returns = ortho_returns;
     }
 
     println!(
@@ -122,8 +129,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute risk attribution for thematic factors
     println!("\n=== Thematic Risk Attribution Analysis ===");
-    let mut risk_attributor =
-        RiskAttributor::new(factor_model, config.model_settings.risk_lookback_days);
+    let mut risk_attributor = RiskAttributor::new(
+        thematic_model,
+        config.model_settings.risk_lookback_days,
+        returns.clone(),
+    );
     let attributions = risk_attributor.compute_portfolio_risk_attribution(
         returns.view(),
         &tickers,
@@ -152,27 +162,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fitness_metrics =
         risk_attributor.evaluate_model_fitness(returns.view(), &tickers, window_size)?;
 
-    println!("\nModel Performance Metrics:");
+    print_model_metrics("Thematic Model", &fitness_metrics);
+
+    Ok(())
+}
+
+fn print_model_metrics(model_name: &str, metrics: &ModelFitMetrics) {
+    println!("{} Performance Metrics:", model_name);
     println!(
         "In-sample R-squared: {:.2}%",
-        fitness_metrics.in_sample_r_squared * 100.0
+        metrics.in_sample_r_squared * 100.0
     );
     println!(
         "Out-of-sample R-squared: {:.2}%",
-        fitness_metrics.out_of_sample_r_squared * 100.0
+        metrics.out_of_sample_r_squared * 100.0
     );
-    println!(
-        "Information Ratio: {:.2}",
-        fitness_metrics.information_ratio
-    );
-    println!("RMSE: {:.4}%", fitness_metrics.prediction_error * 100.0);
+    println!("Information Ratio: {:.2}", metrics.information_ratio);
+    println!("RMSE: {:.4}%", metrics.prediction_error * 100.0);
 
     println!("\nFactor Stability Analysis:");
-    let mut stability_scores: Vec<_> = fitness_metrics.factor_stability.iter().collect();
-    stability_scores.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    for (factor, stability) in stability_scores {
-        println!("{}: {:.2}", factor, stability);
-    }
+    let mut stabilities: Vec<_> = metrics.factor_stability.iter().collect();
+    stabilities.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
 
-    Ok(())
+    // Print header
+    println!(
+        "\n{:<15} {:<10} {:<15}",
+        "Factor", "Stability", "Interpretation"
+    );
+    println!("{:-<50}", "");
+
+    for (factor, stability) in stabilities {
+        let interpretation = match *stability {
+            s if s >= 0.8 => "Very Stable",
+            s if s >= 0.6 => "Stable",
+            s if s >= 0.4 => "Moderately Stable",
+            s if s >= 0.2 => "Unstable",
+            _ => "Very Unstable",
+        };
+        println!("{:<15} {:<10.3} {:<15}", factor, stability, interpretation);
+    }
+    println!();
 }
