@@ -1,7 +1,9 @@
 [package]
-name = "risk_toolkit"
+name = "pythia"
 version = "0.1.0"
 edition = "2021"
+description = "A market risk analysis toolkit inspired by the Oracle of Delphi"
+authors = ["Charles Maloney"]
 
 [dependencies]
 csv = "1.3"

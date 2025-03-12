@@ -765,6 +765,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pythia"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "csv",
+ "ndarray",
+ "ndarray-linalg",
+ "serde",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -827,18 +839,6 @@ dependencies = [
  "getrandom 0.2.15",
  "libredox",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "risk_toolkit"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "csv",
- "ndarray",
- "ndarray-linalg",
- "serde",
- "thiserror 2.0.12",
 ]
 
 [[package]]
