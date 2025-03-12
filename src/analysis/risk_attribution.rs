@@ -59,19 +59,27 @@ impl RiskAttributor {
 
         // Compute total variance and R-squared
         let total_var = systematic_var + specific_var;
+        let total_risk = total_var.sqrt();
         let r_squared = systematic_var / total_var;
 
-        // Compute individual factor contributions
+        // Compute individual factor contributions using betas (factor loadings)
         let mut factor_contributions = HashMap::new();
+
+        // Store factor loadings (betas)
         for (i, group) in factor_groups.iter().enumerate() {
-            let contribution = betas[i] * betas.dot(&factor_cov.column(i));
-            factor_contributions.insert(group.name.clone(), contribution);
+            factor_contributions.insert(group.name.clone(), betas[i]);
         }
+
+        // Add idiosyncratic component
+        factor_contributions.insert(
+            "Idiosyncratic".to_string(),
+            specific_var.sqrt() / total_risk,
+        );
 
         Ok(RiskAttribution {
             factor_contributions,
             specific_risk: specific_var.sqrt(),
-            total_risk: total_var.sqrt(),
+            total_risk,
             r_squared,
         })
     }
@@ -83,18 +91,24 @@ impl RiskAttributor {
         tickers: &[String],
         weights: Option<&[f64]>,
     ) -> Result<Vec<RiskAttribution>> {
-        // Compute factor returns
-        let factor_returns = self.model.compute_factor_returns(returns, tickers)?;
+        // Compute factor returns and orthogonalize them
+        let raw_factor_returns = self.model.compute_factor_returns(returns, tickers)?;
+        let ortho_factor_returns = self
+            .model
+            .orthogonalize_factor_returns(raw_factor_returns.view())?;
         let factor_groups = self.model.get_factor_groups();
 
         let n_assets = returns.ncols();
         let mut attributions = Vec::with_capacity(n_assets);
 
-        // Compute attribution for each asset
+        // Compute attribution for each asset using orthogonalized factors
         for i in 0..n_assets {
             let asset_returns = returns.column(i);
-            let attribution =
-                self.compute_risk_attribution(asset_returns, factor_returns.view(), factor_groups)?;
+            let attribution = self.compute_risk_attribution(
+                asset_returns,
+                ortho_factor_returns.view(),
+                factor_groups,
+            )?;
             attributions.push(attribution);
         }
 

@@ -64,6 +64,20 @@ factor_groups:
       - "RMB00-USA"  # CNY
 
 model_settings:
-  pca_factors: 6  # Increased from 3 to 6
+  pca_factors: 6
   risk_lookback_days: 252
-  min_coverage_pct: 80 
+  min_coverage_pct: 80
+
+orthogonalization:
+  enabled: true
+  method: "gram_schmidt"  # Options: gram_schmidt, pca, regression
+  priority_order:
+    # Order matters! Earlier factors maintain their original returns
+    # Later factors are orthogonalized against previous ones
+    - ["US Rates", "European Rates", "Asian Rates"]  # Rates first due to macro importance
+    - ["US Equity", "European Equity", "Asian Equity"]  # Regional equity blocks
+    - ["Energy", "Precious Metals"]  # Commodities
+    - ["Major FX", "EM FX"]  # FX last as they're often driven by other factors
+  constraints:
+    max_correlation: 0.3  # Maximum allowed correlation between factors
+    min_variance_explained: 0.01  # Minimum variance explained to keep a factor 

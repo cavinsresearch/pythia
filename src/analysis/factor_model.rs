@@ -1,3 +1,5 @@
+use super::orthogonalization::FactorOrthogonalizer;
+use crate::types::OrthogonalizationMethod;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -123,6 +125,28 @@ impl ThematicFactorModel {
     /// Get mutable factor groups
     pub fn get_factor_groups_mut(&mut self) -> &mut Vec<FactorGroup> {
         &mut self.factor_groups
+    }
+
+    pub fn orthogonalize_factor_returns(
+        &self,
+        factor_returns: ArrayView2<f64>,
+    ) -> Result<Array2<f64>> {
+        let mut orthogonalizer = FactorOrthogonalizer::new(
+            OrthogonalizationMethod::GramSchmidt,
+            0.8,  // max_correlation threshold
+            0.01, // min_variance_explained threshold
+        );
+
+        // Create factor names and priority order
+        let factor_names: Vec<String> = self.factor_groups.iter().map(|g| g.name.clone()).collect();
+
+        // Use same order for priority
+        let priority_order = factor_names.clone();
+
+        // Call orthogonalize and return just the factor returns
+        let (ortho_returns, _) =
+            orthogonalizer.orthogonalize(factor_returns, &factor_names, &priority_order);
+        Ok(ortho_returns)
     }
 }
 

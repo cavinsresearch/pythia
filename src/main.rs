@@ -1,10 +1,15 @@
 mod analysis;
 mod config;
 mod data;
+mod types;
 
-use analysis::{factor_model::ThematicFactorModel, pca::PCA, risk_attribution::RiskAttributor};
+use analysis::{
+    factor_model::ThematicFactorModel, orthogonalization::FactorOrthogonalizer, pca::PCA,
+    risk_attribution::RiskAttributor,
+};
 use data::loader::DataLoader;
 use std::env;
+use types::OrthogonalizationMethod;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
@@ -94,7 +99,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let factor_model = ThematicFactorModel::new(factor_groups);
-    let factor_returns = factor_model.compute_factor_returns(returns.view(), &tickers)?;
+    let mut factor_returns = factor_model.compute_factor_returns(returns.view(), &tickers)?;
+
+    // Orthogonalize factor returns if enabled
+    if config.orthogonalization.enabled {
+        println!(
+            "\nOrthogonalizing factor returns using {} method...",
+            match config.orthogonalization.method {
+                OrthogonalizationMethod::GramSchmidt => "Gram-Schmidt",
+                OrthogonalizationMethod::Pca => "PCA",
+                OrthogonalizationMethod::Regression => "Regression",
+            }
+        );
+
+        let mut orthogonalizer = FactorOrthogonalizer::new(
+            config.orthogonalization.method.clone(),
+            config.orthogonalization.constraints.max_correlation,
+            config.orthogonalization.constraints.min_variance_explained,
+        );
+
+        let factor_names: Vec<String> = factor_model
+            .get_factor_groups()
+            .iter()
+            .map(|g| g.name.clone())
+            .collect();
+
+        let priority_order = config.get_factor_priority();
+        let (ortho_returns, kept_factors) =
+            orthogonalizer.orthogonalize(factor_returns.view(), &factor_names, &priority_order);
+
+        println!("\nKept {} orthogonalized factors:", kept_factors.len());
+        for factor in &kept_factors {
+            println!("  - {}", factor);
+        }
+
+        factor_returns = ortho_returns;
+    }
 
     println!(
         "\nThematic Factor Returns Shape: {} periods × {} factors",
