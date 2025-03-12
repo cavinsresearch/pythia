@@ -790,6 +790,7 @@ dependencies = [
 name = "pythia"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "chrono",
  "csv",
  "ndarray",

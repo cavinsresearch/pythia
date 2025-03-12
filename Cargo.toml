@@ -13,3 +13,4 @@ ndarray = { version = "0.16.1", features = ["serde"] }
 ndarray-linalg = { version = "0.17.0", features = ["openblas-system"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2.0.12"
+approx = "0.5"

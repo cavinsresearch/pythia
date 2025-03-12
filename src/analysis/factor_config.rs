@@ -1,4 +1,6 @@
 use super::factor_model::FactorGroup;
+use super::factors::FactorType;
+use super::weighting::WeightingScheme;
 
 /// Creates predefined factor groups for market analysis
 pub fn create_default_factor_groups() -> Vec<FactorGroup> {
@@ -14,6 +16,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "NIK22500-OSE".to_string(), // Nikkei 225
             ],
             weights: None,
+            weighting_scheme: Some(WeightingScheme::Equal),
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "Energy".to_string(),
@@ -24,6 +28,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "NG00-USA".to_string(),   // Natural Gas
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "Precious Metals".to_string(),
@@ -33,6 +39,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "SI00-USA".to_string(), // Silver
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "US Rates".to_string(),
@@ -43,6 +51,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "TY00-USA".to_string(), // 10Y
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "European Rates".to_string(),
@@ -54,6 +64,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "RLI00-IFEU".to_string(), // UK 10Y
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "Asian Rates".to_string(),
@@ -63,6 +75,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "JGBS00-OSE".to_string(), // Japanese 20Y
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "Major FX".to_string(),
@@ -74,6 +88,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "SFC00-USA".to_string(), // CHF
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
         FactorGroup {
             name: "EM FX".to_string(),
@@ -82,6 +98,8 @@ pub fn create_default_factor_groups() -> Vec<FactorGroup> {
                 "RMB00-USA".to_string(), // CNY
             ],
             weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Thematic,
         },
     ]
 }
@@ -93,7 +111,9 @@ pub fn create_pca_factor_groups(n_factors: usize, tickers: &[String]) -> Vec<Fac
             name: format!("PCA Factor {}", i + 1),
             description: format!("Statistical factor {} from PCA", i + 1),
             assets: tickers.to_vec(),
-            weights: None, // Weights will be set from eigenvectors
+            weights: None,
+            weighting_scheme: None,
+            factor_type: FactorType::Statistical,
         })
         .collect()
 }

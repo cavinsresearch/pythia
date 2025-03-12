@@ -3,6 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::analysis::factor_model::FactorGroup;
+use crate::analysis::factors::FactorType;
+use crate::analysis::weighting::WeightingScheme;
 use crate::types::OrthogonalizationMethod;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +33,8 @@ pub struct FactorGroupConfig {
     pub name: String,
     pub description: String,
     pub assets: Vec<String>,
+    pub weighting: Option<WeightingScheme>,
+    pub factor_type: FactorType,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,12 +59,13 @@ impl Config {
                 description: group.description.clone(),
                 assets: group.assets.clone(),
                 weights: None,
+                weighting_scheme: group.weighting.clone(),
+                factor_type: group.factor_type.clone(),
             })
             .collect()
     }
 
     pub fn get_factor_priority(&self) -> Vec<String> {
-        // Flatten priority order into a single ordered list
         self.orthogonalization
             .priority_order
             .iter()

@@ -1,6 +1,9 @@
 use super::factor_model::{FactorGroup, ThematicFactorModel};
+use super::factors::FactorType;
+use super::weighting::WeightingScheme;
 use ndarray::{s, Array1, Array2, ArrayView2};
 use ndarray_linalg::*;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -84,6 +87,8 @@ impl PCA {
                 ),
                 assets: vec![], // Will be set by the caller
                 weights: Some(weights),
+                weighting_scheme: None,
+                factor_type: FactorType::Statistical,
             });
         }
 

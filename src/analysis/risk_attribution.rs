@@ -1,4 +1,5 @@
 use super::factor_model::{FactorGroup, ThematicFactorModel};
+use crate::types::OrthogonalizationMethod;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -86,16 +87,19 @@ impl RiskAttributor {
 
     /// Compute risk attribution for all assets
     pub fn compute_portfolio_risk_attribution(
-        &self,
+        &mut self,
         returns: ArrayView2<f64>,
         tickers: &[String],
         weights: Option<&[f64]>,
     ) -> Result<Vec<RiskAttribution>> {
         // Compute factor returns and orthogonalize them
         let raw_factor_returns = self.model.compute_factor_returns(returns, tickers)?;
-        let ortho_factor_returns = self
-            .model
-            .orthogonalize_factor_returns(raw_factor_returns.view())?;
+        let ortho_factor_returns = self.model.orthogonalize_factor_returns(
+            raw_factor_returns.view(),
+            OrthogonalizationMethod::GramSchmidt,
+            0.3,  // max_correlation
+            0.01, // min_variance_explained
+        )?;
         let factor_groups = self.model.get_factor_groups();
 
         let n_assets = returns.ncols();
@@ -151,7 +155,16 @@ fn compute_regression_coefficients(X: ArrayView2<f64>, y: ArrayView1<f64>) -> Re
     let xtx = X.t().dot(&X);
     let xty = X.t().dot(&y);
 
-    xtx.solve(&xty)
+    // Add a small regularization term (ridge regression)
+    let n = xtx.nrows();
+    let lambda = 1e-6; // Small regularization parameter
+    let mut xtx_reg = xtx.to_owned();
+    for i in 0..n {
+        xtx_reg[[i, i]] += lambda;
+    }
+
+    xtx_reg
+        .solve(&xty)
         .map_err(|e| RiskAttributionError::FactorModelError(e.into()))
 }
 

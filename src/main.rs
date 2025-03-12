@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute risk attribution for PCA factors
     println!("\n=== PCA Risk Attribution Analysis ===");
-    let risk_attributor = RiskAttributor::new(
+    let mut risk_attributor = RiskAttributor::new(
         pca_result.factor_model,
         config.model_settings.risk_lookback_days,
     );
@@ -98,40 +98,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Assets: {}", group.assets.join(", "));
     }
 
-    let factor_model = ThematicFactorModel::new(factor_groups);
+    let mut factor_model = ThematicFactorModel::new(factor_groups);
     let mut factor_returns = factor_model.compute_factor_returns(returns.view(), &tickers)?;
 
     // Orthogonalize factor returns if enabled
     if config.orthogonalization.enabled {
-        println!(
-            "\nOrthogonalizing factor returns using {} method...",
-            match config.orthogonalization.method {
-                OrthogonalizationMethod::GramSchmidt => "Gram-Schmidt",
-                OrthogonalizationMethod::Pca => "PCA",
-                OrthogonalizationMethod::Regression => "Regression",
-            }
-        );
-
-        let mut orthogonalizer = FactorOrthogonalizer::new(
-            config.orthogonalization.method.clone(),
+        let priority_order = config.get_factor_priority();
+        let ortho_returns = factor_model.orthogonalize_factor_returns(
+            factor_returns.view(),
+            config.orthogonalization.method,
             config.orthogonalization.constraints.max_correlation,
             config.orthogonalization.constraints.min_variance_explained,
-        );
-
-        let factor_names: Vec<String> = factor_model
-            .get_factor_groups()
-            .iter()
-            .map(|g| g.name.clone())
-            .collect();
-
-        let priority_order = config.get_factor_priority();
-        let (ortho_returns, kept_factors) =
-            orthogonalizer.orthogonalize(factor_returns.view(), &factor_names, &priority_order);
-
-        println!("\nKept {} orthogonalized factors:", kept_factors.len());
-        for factor in &kept_factors {
-            println!("  - {}", factor);
-        }
+        )?;
 
         factor_returns = ortho_returns;
     }
@@ -144,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compute risk attribution for thematic factors
     println!("\n=== Thematic Risk Attribution Analysis ===");
-    let risk_attributor =
+    let mut risk_attributor =
         RiskAttributor::new(factor_model, config.model_settings.risk_lookback_days);
     let attributions = risk_attributor.compute_portfolio_risk_attribution(
         returns.view(),
