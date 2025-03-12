@@ -5,7 +5,7 @@ model_settings:
 
 orthogonalization:
   enabled: true
-  method: gram_schmidt
+  method: pca
   priority_order:
     - [US Rates, European Rates, Asian Rates]  # Rates first due to macro importance
     - [US Equity, European Equity, Asian Equity]  # Regional equity blocks

@@ -146,5 +146,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Evaluate model fitness
+    println!("\n=== Model Fitness Analysis ===");
+    let window_size = config.model_settings.risk_lookback_days;
+    let fitness_metrics =
+        risk_attributor.evaluate_model_fitness(returns.view(), &tickers, window_size)?;
+
+    println!("\nModel Performance Metrics:");
+    println!(
+        "In-sample R-squared: {:.2}%",
+        fitness_metrics.in_sample_r_squared * 100.0
+    );
+    println!(
+        "Out-of-sample R-squared: {:.2}%",
+        fitness_metrics.out_of_sample_r_squared * 100.0
+    );
+    println!(
+        "Information Ratio: {:.2}",
+        fitness_metrics.information_ratio
+    );
+    println!("RMSE: {:.4}%", fitness_metrics.prediction_error * 100.0);
+
+    println!("\nFactor Stability Analysis:");
+    let mut stability_scores: Vec<_> = fitness_metrics.factor_stability.iter().collect();
+    stability_scores.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    for (factor, stability) in stability_scores {
+        println!("{}: {:.2}", factor, stability);
+    }
+
     Ok(())
 }

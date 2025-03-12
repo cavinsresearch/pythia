@@ -70,6 +70,24 @@ impl FactorBuilder {
                     Array1::zeros(returns.nrows())
                 }
             }
+            FactorType::Statistical => {
+                // For statistical factors, we expect the weights to be provided in metadata
+                if let Some(meta) = metadata {
+                    if let Some(weights) = meta.get("weights") {
+                        // Compute weighted returns for each time period
+                        let mut factor_returns = Array1::zeros(returns.nrows());
+                        for t in 0..returns.nrows() {
+                            let period_returns = returns.row(t);
+                            factor_returns[t] = period_returns.dot(weights);
+                        }
+                        factor_returns
+                    } else {
+                        Array1::zeros(returns.nrows())
+                    }
+                } else {
+                    Array1::zeros(returns.nrows())
+                }
+            }
             _ => Array1::zeros(returns.nrows()),
         }
     }

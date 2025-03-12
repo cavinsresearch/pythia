@@ -110,6 +110,32 @@ impl ThematicFactorModel {
                         factor_returns[[period, factor_idx]] = period_returns.dot(&weights);
                     }
                 }
+                FactorType::Statistical => {
+                    // For statistical factors, use the weights from the factor group
+                    if let Some(weights) = &group.weights {
+                        // Add weights to metadata for the factor builder
+                        let mut metadata = self.metadata.clone();
+                        metadata.insert("weights".to_string(), Array1::from(weights.clone()));
+
+                        // Compute factor returns using the weights
+                        let factor_returns_vec = FactorBuilder::compute_factor_returns(
+                            &group.factor_type,
+                            returns,
+                            Some(&metadata),
+                        );
+
+                        for (i, &val) in factor_returns_vec.iter().enumerate() {
+                            factor_returns[[i, factor_idx]] = val;
+                        }
+                    } else {
+                        // If no weights provided, use equal weighting
+                        let n_assets = returns.ncols();
+                        let equal_weight = 1.0 / n_assets as f64;
+                        for t in 0..n_periods {
+                            factor_returns[[t, factor_idx]] = returns.row(t).sum() * equal_weight;
+                        }
+                    }
+                }
                 _ => {
                     // Use the FactorBuilder for other factor types
                     let factor_returns_vec = FactorBuilder::compute_factor_returns(

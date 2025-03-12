@@ -74,10 +74,19 @@ impl PCA {
                 .count()
         });
 
-        // Create factor groups with eigenvector weights
+        // Create factor groups with normalized eigenvector weights
         let mut factor_groups = Vec::with_capacity(n_components);
         for i in 0..n_components {
-            let weights = eigenvectors.column(i).to_vec();
+            let mut weights = eigenvectors.column(i).to_vec();
+
+            // Normalize weights to sum to 1
+            let weight_sum = weights.iter().sum::<f64>();
+            if weight_sum != 0.0 {
+                for w in weights.iter_mut() {
+                    *w /= weight_sum;
+                }
+            }
+
             factor_groups.push(FactorGroup {
                 name: format!("PCA Factor {}", i + 1),
                 description: format!(
