@@ -9,9 +9,12 @@ authors = ["Charles Maloney"]
 csv = "1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-ndarray = { version = "0.15", features = ["serde"] }
-ndarray-linalg = { version = "0.16", features = ["openblas-system"] }
-ndarray-stats = "0.5"
+ndarray = { version = "0.16", features = ["serde"] }
+ndarray-linalg = { version = "0.17", features = ["openblas-system"] }
+ndarray-stats = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
-thiserror = "1.0"
+thiserror = "2.0.12"
 approx = "0.5"
+polars = { version = "0.46.0", features = ["csv", "lazy", "pivot"] }
+polars-ops = "0.46.0"
+anyhow = "1.0"
